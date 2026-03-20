@@ -1,226 +1,249 @@
 # Database Schema
 
-## Overview
+## Storage Strategy
 
-PostgreSQL is the system of record for market data, derived analytics, scan outputs, and alert events. The MVP favors explicit tables and daily snapshots over highly compressed storage so that scans are debuggable and API reads stay simple.
+SQLite is the default MVP database. The schema should stay conservative and relational so that PostgreSQL migration later is straightforward.
 
-All market-derived rows should be tied to both a `stock_id` and a `trade_date` or `as_of_date`.
+General design rules:
 
-## Relationship summary
+- use integer surrogate keys for MVP simplicity
+- enforce uniqueness on natural business keys where appropriate
+- store `timeframe` explicitly on time-series and scan-derived tables
+- keep provider metadata and timestamps for traceability
+- separate raw bars, indicators, ranges, scores, and setups
 
-- `stocks` is the parent entity for all ticker-specific tables.
-- `ohlcv` stores normalized daily candles.
-- `indicators` stores daily technical indicators derived from `ohlcv`.
-- `ranges` stores qualifying range snapshots for a given date.
-- `range_scores` stores component and composite scores for a `ranges` row.
-- `trade_setups` stores generated long or short setup rows tied to a `ranges` row.
-- `alerts` stores event records tied to a ticker and optionally a setup/range snapshot.
+## Tables
 
-## Table: `stocks`
+### `stocks`
 
-Canonical ticker and universe membership table.
+Purpose: canonical S&P 500 security master for the app universe.
 
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | `bigserial` | Primary key |
-| `ticker` | `varchar(16)` | Unique uppercase symbol |
-| `name` | `varchar(255)` | Company name |
-| `exchange` | `varchar(32)` | Optional exchange code |
-| `sector` | `varchar(128)` | Optional metadata |
-| `industry` | `varchar(128)` | Optional metadata |
-| `is_active` | `boolean` | True when currently in tracked universe |
-| `universe` | `varchar(32)` | For MVP expected value is `sp500` |
-| `source` | `varchar(64)` | Universe source identifier |
-| `created_at` | `timestamptz` | Row creation time |
-| `updated_at` | `timestamptz` | Row update time |
+Columns:
 
-Indexes and constraints:
+- `id` INTEGER PRIMARY KEY
+- `ticker` TEXT NOT NULL UNIQUE
+- `name` TEXT NOT NULL
+- `sector` TEXT NULL
+- `industry` TEXT NULL
+- `exchange` TEXT NULL
+- `is_active` BOOLEAN NOT NULL DEFAULT 1
+- `universe_source` TEXT NULL
+- `created_at` TIMESTAMP NOT NULL
+- `updated_at` TIMESTAMP NOT NULL
 
-- primary key on `id`
+Indexes:
+
 - unique index on `ticker`
-- index on `(universe, is_active)`
+- index on `is_active`
 
-## Table: `ohlcv`
+### `ohlcv`
 
-Normalized daily candle history.
+Purpose: completed historical market bars used for analytics.
 
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | `bigserial` | Primary key |
-| `stock_id` | `bigint` | FK to `stocks.id` |
-| `trade_date` | `date` | Trading session date |
-| `open` | `numeric(18,6)` | Daily open |
-| `high` | `numeric(18,6)` | Daily high |
-| `low` | `numeric(18,6)` | Daily low |
-| `close` | `numeric(18,6)` | Daily close |
-| `adjusted_close` | `numeric(18,6)` | Optional provider-adjusted close |
-| `volume` | `bigint` | Daily share volume |
-| `vwap` | `numeric(18,6)` | Optional if provider supplies it |
-| `data_source` | `varchar(64)` | Provider identifier |
-| `is_adjusted_series` | `boolean` | Whether OHLC values are adjusted |
-| `ingested_at` | `timestamptz` | Ingestion timestamp |
-| `created_at` | `timestamptz` | Row creation time |
+Columns:
 
-Indexes and constraints:
+- `id` INTEGER PRIMARY KEY
+- `stock_id` INTEGER NOT NULL
+- `timeframe` TEXT NOT NULL
+- `bar_date` DATE NOT NULL
+- `open` REAL NOT NULL
+- `high` REAL NOT NULL
+- `low` REAL NOT NULL
+- `close` REAL NOT NULL
+- `adjusted_close` REAL NULL
+- `volume` REAL NOT NULL
+- `provider` TEXT NOT NULL
+- `provider_timezone` TEXT NULL
+- `is_complete` BOOLEAN NOT NULL DEFAULT 1
+- `ingested_at` TIMESTAMP NOT NULL
 
-- unique index on `(stock_id, trade_date)`
-- index on `(trade_date)`
-- index on `(stock_id, trade_date desc)`
+Keys and indexes:
 
-## Table: `indicators`
+- foreign key `stock_id -> stocks.id`
+- unique index on (`stock_id`, `timeframe`, `bar_date`)
+- index on (`timeframe`, `bar_date`)
 
-Daily derived indicator snapshots.
+Notes:
 
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | `bigserial` | Primary key |
-| `stock_id` | `bigint` | FK to `stocks.id` |
-| `trade_date` | `date` | Same date as driving candle |
-| `sma_20` | `numeric(18,6)` | 20-day simple moving average |
-| `sma_20_slope` | `numeric(18,6)` | Absolute/normalized slope metric |
-| `atr_14` | `numeric(18,6)` | 14-day average true range |
-| `adx_14` | `numeric(18,6)` | 14-day ADX |
-| `rsi_14` | `numeric(18,6)` | 14-day RSI |
-| `avg_dollar_volume_20` | `numeric(18,2)` | Liquidity proxy |
-| `created_at` | `timestamptz` | Row creation time |
+- Only completed candles should be stored with `is_complete = 1` for MVP analytics.
+- If future ingestion stages ever capture incomplete bars, they must never be used by the analytics pipeline.
 
-Indexes and constraints:
+### `indicators`
 
-- unique index on `(stock_id, trade_date)`
-- index on `(trade_date)`
-- index on `(stock_id, trade_date desc)`
+Purpose: persisted indicator snapshots for a specific symbol, timeframe, and bar date.
 
-## Table: `ranges`
+Columns:
 
-One row per ticker per scan date when the ticker qualifies as range-bound in the MVP.
+- `id` INTEGER PRIMARY KEY
+- `stock_id` INTEGER NOT NULL
+- `timeframe` TEXT NOT NULL
+- `bar_date` DATE NOT NULL
+- `adx_14` REAL NULL
+- `sma_20` REAL NULL
+- `sma_20_slope` REAL NULL
+- `normalized_sma_20_slope` REAL NULL
+- `atr_14` REAL NULL
+- `rsi_14` REAL NULL
+- `net_drift_30` REAL NULL
+- `avg_volume_20` REAL NULL
+- `avg_dollar_volume_20` REAL NULL
+- `computed_at` TIMESTAMP NOT NULL
 
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | `bigserial` | Primary key |
-| `stock_id` | `bigint` | FK to `stocks.id` |
-| `as_of_date` | `date` | Scan/result date |
-| `lookback_days` | `integer` | MVP default `30` |
-| `upper_bound` | `numeric(18,6)` | Highest high over lookback |
-| `lower_bound` | `numeric(18,6)` | Lowest low over lookback |
-| `midline` | `numeric(18,6)` | Midpoint of range |
-| `range_width` | `numeric(18,6)` | `upper_bound - lower_bound` |
-| `range_width_atr_multiple` | `numeric(18,6)` | Width divided by ATR |
-| `support_zone_low` | `numeric(18,6)` | Lower support zone bound |
-| `support_zone_high` | `numeric(18,6)` | Upper support zone bound |
-| `resistance_zone_low` | `numeric(18,6)` | Lower resistance zone bound |
-| `resistance_zone_high` | `numeric(18,6)` | Upper resistance zone bound |
-| `containment_ratio` | `numeric(8,6)` | Fraction of closes inside bounds |
-| `support_touch_count` | `integer` | Qualified touch count |
-| `resistance_touch_count` | `integer` | Qualified touch count |
-| `latest_close` | `numeric(18,6)` | Close on `as_of_date` |
-| `qualified` | `boolean` | True for persisted MVP rows; included for extensibility |
-| `notes_json` | `jsonb` | Optional debug metadata |
-| `created_at` | `timestamptz` | Row creation time |
+Keys and indexes:
 
-Indexes and constraints:
+- foreign key `stock_id -> stocks.id`
+- unique index on (`stock_id`, `timeframe`, `bar_date`)
 
-- unique index on `(stock_id, as_of_date)`
-- index on `(as_of_date desc)`
-- index on `(qualified, as_of_date desc)`
+### `ranges`
 
-## Table: `range_scores`
+Purpose: persisted range detection outputs for the latest completed scan state of a symbol.
 
-Stores the final and component scores for a range snapshot.
+Columns:
 
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | `bigserial` | Primary key |
-| `range_id` | `bigint` | FK to `ranges.id` |
-| `range_score` | `numeric(6,2)` | 0 to 100 composite score |
-| `range_validity_score` | `numeric(6,2)` | 0 to 100 |
-| `tradeability_score` | `numeric(6,2)` | 0 to 100 |
-| `opportunity_score` | `numeric(6,2)` | 0 to 100 |
-| `touch_quality_score` | `numeric(6,2)` | Weighted component |
-| `trend_weakness_score` | `numeric(6,2)` | Weighted component |
-| `containment_quality_score` | `numeric(6,2)` | Weighted component |
-| `range_width_score` | `numeric(6,2)` | Weighted component |
-| `liquidity_score` | `numeric(6,2)` | Weighted component |
-| `current_opportunity_location_score` | `numeric(6,2)` | Weighted component |
-| `scoring_version` | `varchar(32)` | For future rule evolution |
-| `created_at` | `timestamptz` | Row creation time |
+- `id` INTEGER PRIMARY KEY
+- `stock_id` INTEGER NOT NULL
+- `timeframe` TEXT NOT NULL
+- `scan_date` DATE NOT NULL
+- `lookback_bars` INTEGER NOT NULL
+- `upper_bound` REAL NOT NULL
+- `lower_bound` REAL NOT NULL
+- `support_zone_low` REAL NOT NULL
+- `support_zone_high` REAL NOT NULL
+- `resistance_zone_low` REAL NOT NULL
+- `resistance_zone_high` REAL NOT NULL
+- `midline` REAL NOT NULL
+- `range_width` REAL NOT NULL
+- `atr_14` REAL NOT NULL
+- `touch_count_support` INTEGER NOT NULL
+- `touch_count_resistance` INTEGER NOT NULL
+- `containment_ratio` REAL NOT NULL
+- `drift_to_range_ratio` REAL NOT NULL
+- `has_recent_breakout` BOOLEAN NOT NULL
+- `qualifies` BOOLEAN NOT NULL
+- `rejection_reason` TEXT NULL
+- `computed_from_bar_date` DATE NOT NULL
+- `created_at` TIMESTAMP NOT NULL
 
-Indexes and constraints:
+Keys and indexes:
 
+- foreign key `stock_id -> stocks.id`
+- unique index on (`stock_id`, `timeframe`, `scan_date`)
+- index on (`timeframe`, `scan_date`, `qualifies`)
+
+Notes:
+
+- MVP may choose to store only qualifying rows initially.
+- Keeping `qualifies` and `rejection_reason` allows later debugging without redesign.
+
+### `range_scores`
+
+Purpose: explainable scoring outputs tied to a range record.
+
+Columns:
+
+- `id` INTEGER PRIMARY KEY
+- `range_id` INTEGER NOT NULL
+- `range_score` REAL NOT NULL
+- `range_validity_score` REAL NOT NULL
+- `tradeability_score` REAL NOT NULL
+- `opportunity_score` REAL NOT NULL
+- `touch_quality_score` REAL NOT NULL
+- `trend_weakness_score` REAL NOT NULL
+- `containment_quality_score` REAL NOT NULL
+- `width_vs_atr_score` REAL NOT NULL
+- `liquidity_score` REAL NOT NULL
+- `opportunity_location_score` REAL NOT NULL
+- `scored_at` TIMESTAMP NOT NULL
+
+Keys and indexes:
+
+- foreign key `range_id -> ranges.id`
 - unique index on `range_id`
-- index on `(range_score desc)`
-- index on `(opportunity_score desc)`
+- index on `range_score`
 
-## Table: `trade_setups`
+### `trade_setups`
 
-Directional trade ideas generated from a range snapshot.
+Purpose: long and short setup candidates generated from a qualified range.
 
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | `bigserial` | Primary key |
-| `range_id` | `bigint` | FK to `ranges.id` |
-| `stock_id` | `bigint` | FK to `stocks.id` for direct lookup |
-| `as_of_date` | `date` | Setup date |
-| `direction` | `varchar(8)` | `long` or `short` |
-| `status` | `varchar(16)` | `active`, `inactive`, `expired` |
-| `entry_zone_low` | `numeric(18,6)` | Entry zone low |
-| `entry_zone_high` | `numeric(18,6)` | Entry zone high |
-| `stop_price` | `numeric(18,6)` | ATR-buffered stop |
-| `target_1_price` | `numeric(18,6)` | Midline |
-| `target_2_price` | `numeric(18,6)` | Opposite range side |
-| `rejection_signal` | `varchar(64)` | `bullish_rejection` or `bearish_rejection` |
-| `latest_close` | `numeric(18,6)` | Current close at setup time |
-| `created_at` | `timestamptz` | Row creation time |
+Columns:
 
-Indexes and constraints:
+- `id` INTEGER PRIMARY KEY
+- `range_id` INTEGER NOT NULL
+- `setup_direction` TEXT NOT NULL
+- `setup_status` TEXT NOT NULL
+- `trigger_bar_date` DATE NOT NULL
+- `entry_low` REAL NOT NULL
+- `entry_high` REAL NOT NULL
+- `stop_price` REAL NOT NULL
+- `target_1_price` REAL NOT NULL
+- `target_2_price` REAL NOT NULL
+- `rsi_14` REAL NULL
+- `rejection_signal` TEXT NULL
+- `notes` TEXT NULL
+- `created_at` TIMESTAMP NOT NULL
+- `updated_at` TIMESTAMP NOT NULL
 
-- unique index on `(range_id, direction)`
-- index on `(as_of_date desc, status)`
-- index on `(stock_id, as_of_date desc)`
+Keys and indexes:
 
-## Table: `alerts`
+- foreign key `range_id -> ranges.id`
+- index on (`setup_direction`, `setup_status`)
+- index on `trigger_bar_date`
 
-Persisted events when setup state changes or thresholds are crossed.
+Notes:
 
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | `bigserial` | Primary key |
-| `stock_id` | `bigint` | FK to `stocks.id` |
-| `range_id` | `bigint` | Nullable FK to `ranges.id` |
-| `trade_setup_id` | `bigint` | Nullable FK to `trade_setups.id` |
-| `alert_type` | `varchar(32)` | e.g. `new_opportunity` |
-| `direction` | `varchar(8)` | Nullable long/short |
-| `message` | `text` | Human-readable summary |
-| `payload_json` | `jsonb` | Optional structured payload |
-| `created_at` | `timestamptz` | Event time |
+- `setup_status` can start with values like `candidate`, `active`, or `invalidated`.
+- A symbol can have both long and short setup records over time, but only one per direction per scan snapshot should be current.
 
-Indexes and constraints:
+### `alerts`
 
-- index on `(created_at desc)`
-- index on `(stock_id, created_at desc)`
-- index on `(alert_type, created_at desc)`
+Purpose: placeholder table for future change notifications and watchlist events.
 
-## Key relationships
+Columns:
 
-- `ohlcv.stock_id -> stocks.id`
-- `indicators.stock_id -> stocks.id`
-- `ranges.stock_id -> stocks.id`
-- `range_scores.range_id -> ranges.id`
-- `trade_setups.range_id -> ranges.id`
-- `trade_setups.stock_id -> stocks.id`
-- `alerts.stock_id -> stocks.id`
-- `alerts.range_id -> ranges.id`
-- `alerts.trade_setup_id -> trade_setups.id`
+- `id` INTEGER PRIMARY KEY
+- `stock_id` INTEGER NOT NULL
+- `range_id` INTEGER NULL
+- `trade_setup_id` INTEGER NULL
+- `alert_type` TEXT NOT NULL
+- `alert_status` TEXT NOT NULL
+- `message` TEXT NULL
+- `triggered_at` TIMESTAMP NOT NULL
+- `acknowledged_at` TIMESTAMP NULL
 
-## Notes on time-series retention
+Keys and indexes:
 
-- MVP recommendation: keep all daily OHLCV and indicator history used for analysis rather than pruning aggressively.
-- Minimum practical retention target: two years of daily bars and indicators per ticker.
-- Range, score, setup, and alert snapshots should be retained indefinitely during MVP so changes in logic and outcomes can be audited.
-- If storage becomes a concern later, archive older OHLCV and indicator partitions before deleting them.
-- Partitioning by year or by trade date range can be added later, but is not required for the first implementation.
+- foreign key `stock_id -> stocks.id`
+- foreign key `range_id -> ranges.id`
+- foreign key `trade_setup_id -> trade_setups.id`
+- index on (`alert_type`, `alert_status`)
+- index on `triggered_at`
 
-## Implementation notes
+Notes:
 
-- Numeric precision should be consistent across all price fields to avoid chart and API rounding mismatches.
-- Use UTC timestamps for metadata columns even though market dates are stored as `date`.
-- Avoid storing arrays of candles inside snapshot tables; keep chart data sourced from `ohlcv`.
+- This table is included now to preserve room for future work, but alerts are not core MVP functionality.
+
+## Relationships
+
+- one `stocks` row has many `ohlcv` rows
+- one `stocks` row has many `indicators` rows
+- one `stocks` row has many `ranges` rows
+- one `ranges` row has one `range_scores` row
+- one `ranges` row has many `trade_setups` rows over time
+- one `stocks` row may have many `alerts`
+
+## Scan Metadata Recommendation
+
+The MVP can optionally add a later `scan_runs` table to track each orchestration run. It is not required for the first schema pass but is recommended once scans become operational.
+
+## SQLite MVP Notes
+
+- Use ISO date strings or timezone-aware timestamps consistently.
+- Prefer explicit transactions for scan steps.
+- Avoid SQLite-specific SQL in higher-level query code when portability matters.
+- Store booleans using SQLite-compatible integer semantics through the ORM.
+
+## PostgreSQL Migration Notes
+
+- Preserve explicit indexes and unique constraints so they translate cleanly.
+- Keep text enums modeled as constrained strings first; PostgreSQL enums can be added later if useful.
+- Avoid implicit SQLite-only behavior such as relying on weak typing in business logic.

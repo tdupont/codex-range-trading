@@ -8,14 +8,10 @@ export const metadata: Metadata = {
   description: "Dashboard for ranked range-bound stock setups.",
 };
 
-type RootLayoutProps = {
-  children: ReactNode;
-};
-
-export default function RootLayout({ children }: RootLayoutProps) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className="bg-slate-50 text-ink antialiased">{children}</body>
     </html>
   );
 }

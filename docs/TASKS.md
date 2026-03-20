@@ -1,113 +1,99 @@
 # Implementation Tasks
 
-## Phase 1: project setup
+This file breaks the MVP into sequential phases. Complete phases in order unless there is a clear reason to parallelize.
 
-- [ ] Finalize backend dependency management choice and project bootstrap
-- [ ] Finalize frontend dependency management choice and project bootstrap
-- [ ] Create FastAPI app entrypoint and API router registration
-- [ ] Create Next.js app shell and shared layout
-- [ ] Add database connection settings and environment loading
-- [ ] Add SQLAlchemy base setup and Alembic initialization
-- [ ] Add local PostgreSQL startup workflow using `docker-compose.yml`
-- [ ] Make `GET /health` runnable locally
+## Phase 1: Project Setup
 
-## Phase 2: backend data model
+- [x] Create Streamlit-first repository structure
+- [x] Create core planning docs
+- [x] Add root Python packaging files
+- [x] Add `.env.example`
+- [ ] Add linting and test config
+- [ ] Add sample seed files for S&P 500 universe
+- [ ] Add basic settings loader
 
-- [ ] Implement ORM models for `stocks`
-- [ ] Implement ORM models for `ohlcv`
-- [ ] Implement ORM models for `indicators`
-- [ ] Implement ORM models for `ranges`
-- [ ] Implement ORM models for `range_scores`
-- [ ] Implement ORM models for `trade_setups`
-- [ ] Implement ORM models for `alerts`
-- [ ] Create first Alembic migration
+## Phase 2: Data Layer
 
-## Phase 3: ingestion
+- [ ] Define domain models for stocks, bars, indicators, ranges, scores, and setups
+- [ ] Define persistence models or SQLAlchemy tables
+- [ ] Create SQLite connection/session utilities
+- [ ] Create repository/query helpers for latest screener and detail views
+- [ ] Add migration/bootstrap strategy for SQLite schema creation
 
-- [ ] Implement the Data Provider Abstraction interface
-- [ ] Add first concrete provider adapter
-- [ ] Build S&P 500 universe refresh flow
-- [ ] Build OHLCV historical fetch and upsert flow
-- [ ] Handle idempotent re-runs and missing-day updates
-- [ ] Add ingestion logging and failure reporting
-- [ ] Add tests for normalization and upsert behavior
+## Phase 3: Ingestion
 
-## Phase 4: indicators
+- [ ] Implement S&P 500 universe loading
+- [ ] Implement `HistoricalMarketDataProvider` abstraction
+- [ ] Create a local/mock provider for development
+- [ ] Add historical OHLCV normalization and upsert logic
+- [ ] Add ingestion scripts and basic logging
 
-- [ ] Implement indicator service using `pandas`, `numpy`, and chosen TA library
-- [ ] Compute ADX(14), SMA(20), SMA slope, ATR(14), RSI(14)
-- [ ] Compute average dollar volume for liquidity scoring
-- [ ] Persist indicators by ticker and trade date
-- [ ] Add tests for indicator edge cases and warm-up periods
+## Phase 4: Indicators
 
-## Phase 5: range detection
+- [ ] Compute SMA(20)
+- [ ] Compute ATR(14)
+- [ ] Compute ADX(14)
+- [ ] Compute RSI(14)
+- [ ] Compute normalized SMA slope
+- [ ] Compute net drift over the 30-bar window
+- [ ] Compute liquidity helper metrics
+- [ ] Persist indicator snapshots
 
-- [ ] Implement 30-day bound calculation
-- [ ] Implement containment ratio calculation
-- [ ] Implement support and resistance zone construction
-- [ ] Implement touch counting with a cooldown or de-duplication rule
-- [ ] Implement range qualification checks using all documented conditions
-- [ ] Persist qualifying range snapshots
-- [ ] Add unit tests for borderline qualification scenarios
+## Phase 5: Range Detection
 
-## Phase 6: scoring
+- [ ] Implement 30-bar upper/lower bound calculation
+- [ ] Implement support and resistance zone generation
+- [ ] Implement touch counting with separation rules
+- [ ] Implement containment and recent breakout checks
+- [ ] Implement range width vs ATR validation
+- [ ] Implement drift vs range-width validation
+- [ ] Persist qualified range results
+- [ ] Decide whether to store rejected symbols with reasons
 
-- [ ] Implement weighted component scoring
-- [ ] Define score normalization rules to keep outputs between 0 and 100
-- [ ] Implement Range Validity Score
-- [ ] Implement Tradeability Score
-- [ ] Implement Opportunity Score
-- [ ] Persist score breakdowns with versioning
-- [ ] Add tests for score stability and explainability
+## Phase 6: Scoring
 
-## Phase 7: API
+- [ ] Implement touch quality component
+- [ ] Implement trend weakness / ADX component
+- [ ] Implement containment quality component
+- [ ] Implement range width vs ATR component
+- [ ] Implement liquidity component
+- [ ] Implement current opportunity location component
+- [ ] Implement composite `range_score`
+- [ ] Implement `Range Validity Score`
+- [ ] Implement `Tradeability Score`
+- [ ] Implement `Opportunity Score`
 
-- [ ] Implement `GET /health`
-- [ ] Implement `GET /ranges` with filtering, sorting, and pagination
-- [ ] Implement `GET /ranges/{ticker}` with score breakdown and chart payload
-- [ ] Implement `GET /opportunities`
-- [ ] Implement `GET /alerts`
-- [ ] Standardize error responses
-- [ ] Add API tests for happy path and not-found cases
+## Phase 7: Persistence And Query Layer
 
-## Phase 8: frontend
+- [ ] Add write paths for ranges, scores, and setups
+- [ ] Add latest-scan query methods for screener view
+- [ ] Add symbol detail query methods
+- [ ] Add scan metadata persistence
+- [ ] Add optional alerts placeholder persistence
 
-- [ ] Build dashboard page for ranked ranges
-- [ ] Build filter controls
-- [ ] Build ticker detail page
-- [ ] Create typed API client for backend responses
-- [ ] Render score summaries and setup cards
-- [ ] Add loading, empty, and error states
+## Phase 8: Streamlit UI
 
-## Phase 9: charts
+- [ ] Build app shell and navigation
+- [ ] Build screener page
+- [ ] Add sidebar filters
+- [ ] Add score and setup summary components
+- [ ] Build stock detail page
+- [ ] Show scan metadata and data freshness info
 
-- [ ] Integrate a candlestick chart library suitable for daily OHLCV
-- [ ] Plot recent candles on the detail page
-- [ ] Overlay support zone and resistance zone
-- [ ] Overlay midline, stop, and targets when a setup is active
-- [ ] Add tooltip or legend support for key values
+## Phase 9: Charts
 
-## Phase 10: polish/testing
+- [ ] Create Plotly candlestick chart component
+- [ ] Overlay support and resistance zones
+- [ ] Overlay midline
+- [ ] Overlay entry, stop, and target levels
+- [ ] Optionally overlay live quote positioning as display-only context
 
-- [ ] Add end-to-end sanity checks across ingestion to UI
-- [ ] Add seed or fixture data for local development
-- [ ] Review logging and observability basics
-- [ ] Review query performance and indexes
-- [ ] Tighten API response consistency
+## Phase 10: Polish And Testing
+
+- [ ] Add unit tests for indicators
+- [ ] Add unit tests for range detection
+- [ ] Add unit tests for scoring
+- [ ] Add integration tests for persistence/query flows
+- [ ] Add smoke tests for Streamlit app boot
 - [ ] Review docs for implementation drift
-- [ ] Prepare MVP deployment checklist
-
-## Recommended order of execution
-
-1. Complete Phases 1 and 2 before writing production range logic.
-2. Finish Phases 3 through 6 before building most of the frontend.
-3. Deliver API endpoints before chart polish.
-4. Leave non-essential deployment hardening until the core screening loop works.
-
-## Exit criteria by milestone
-
-- Milestone A: local app boots, database connects, health endpoint works
-- Milestone B: ingestion and indicators persist real daily data
-- Milestone C: range detection and scoring produce ranked candidates
-- Milestone D: API exposes list/detail/setup data
-- Milestone E: frontend renders usable dashboard and charts
+- [ ] Tighten defaults and configs based on observed outputs

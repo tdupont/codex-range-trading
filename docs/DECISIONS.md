@@ -1,130 +1,151 @@
 # Architecture Decision Records
 
-## ADR-001: Daily timeframe first
+## ADR-001: Streamlit-First MVP Architecture
 
-- Date: 2026-03-10
 - Status: Accepted
-
-Context:
-
-The product goal is to identify clean, explainable range setups quickly. Supporting intraday data would materially increase ingestion volume, scheduling complexity, and noise in the first version.
+- Date: 2026-03-19
 
 Decision:
 
-The MVP will use daily candles only.
+- Build the MVP as a Streamlit-first Python application in a single repository.
 
-Consequences:
+Rationale:
 
-- Indicator and range logic can be implemented with simpler data pipelines.
-- End-of-day refresh is sufficient for the first release.
-- Intraday alerts and execution-style workflows are explicitly deferred.
+- The product is primarily a local analytics and visualization tool.
+- Streamlit reduces surface area compared with maintaining separate frontend and backend apps.
+- A single-process local workflow is easier for one developer to build and debug.
 
-## ADR-002: S&P 500 only
+Implications:
 
-- Date: 2026-03-10
+- Business logic must still live outside page files.
+- A future FastAPI layer remains possible but is not required for MVP.
+
+## ADR-002: S&P 500-Only Universe
+
 - Status: Accepted
-
-Context:
-
-A constrained universe reduces implementation complexity and helps keep liquidity reasonably high for early validation.
+- Date: 2026-03-19
 
 Decision:
 
-The MVP will screen S&P 500 constituents only.
+- Limit MVP scans to S&P 500 constituents.
 
-Consequences:
+Rationale:
 
-- Universe management remains simple.
-- Liquidity filters can be less defensive than in a broader market scan.
-- Support for ETFs, custom lists, and broader equities is future work.
+- Keeps data volume and UX manageable.
+- Matches the product goal of a clear, focused first release.
 
-## ADR-003: Rule-based detection first
+Implications:
 
-- Date: 2026-03-10
+- Universe refresh logic should remain extensible, but no extra universes should be added in MVP work by default.
+
+## ADR-003: Daily-First Scanning
+
 - Status: Accepted
-
-Context:
-
-The first version needs transparent logic that can be debugged, tested, and explained to users without model training or opaque heuristics.
+- Date: 2026-03-19
 
 Decision:
 
-Range detection will be fully rule-based using ADX, SMA slope, containment, touch counts, and width versus ATR.
+- Daily candles are required and are the default scan mode.
+- Weekly and monthly are optional supported modes if they can reuse the same pipeline cleanly.
 
-Consequences:
+Rationale:
 
-- Output is explainable and deterministic.
-- Threshold tuning can be done through configuration.
-- Machine learning is out of scope until the baseline workflow is validated.
+- The product idea centers on end-of-day range trading.
+- Daily data is simpler to source, test, and explain.
 
-## ADR-004: Support and resistance as zones, not lines
+Implications:
 
-- Date: 2026-03-10
+- Config, storage, and query layers should include a `timeframe` field from the start.
+
+## ADR-004: Rule-Based Detection Before Anything Smarter
+
 - Status: Accepted
-
-Context:
-
-Real price behavior is not precise to a single level. Using lines would create brittle touch logic and unrealistic setup triggers.
+- Date: 2026-03-19
 
 Decision:
 
-Support and resistance will be modeled as ATR-based zones:
+- Use a deterministic rule-based range detection engine for MVP.
 
-- support zone = `[lower_bound, lower_bound + 0.3 * ATR]`
-- resistance zone = `[upper_bound - 0.3 * ATR, upper_bound]`
+Rationale:
 
-Consequences:
+- Rules are transparent, testable, and aligned with the user’s requested detection logic.
+- Machine learning is explicitly out of scope.
 
-- Touch counting is more realistic.
-- Setup entry logic aligns with practical trading behavior.
-- Chart overlays should render shaded bands rather than thin lines.
+Implications:
 
-## ADR-005: Composite score design
+- Thresholds must be configurable and documented.
+- Output should be explainable per component and condition.
 
-- Date: 2026-03-10
+## ADR-005: Support/Resistance Zones Instead Of Lines
+
 - Status: Accepted
-
-Context:
-
-Users need a single ranking number, but also need to understand whether quality comes from structure, liquidity, or current location within the range.
+- Date: 2026-03-19
 
 Decision:
 
-The MVP will use a 0 to 100 composite range score with weighted components:
+- Represent support and resistance as ATR-based zones rather than single price lines.
 
-- touch quality: 30%
-- trend weakness / ADX: 20%
-- containment quality: 15%
-- range width vs ATR: 15%
-- liquidity: 10%
-- current opportunity location: 10%
+Rationale:
 
-The system will also expose Range Validity Score, Tradeability Score, and Opportunity Score.
+- Range interaction is naturally fuzzy.
+- Zone-based logic is more realistic for touches, entries, and stops.
 
-Consequences:
+Implications:
 
-- Ranking is concise while remaining inspectable.
-- Score component storage is required in the database and API.
-- Weight tuning can evolve later under explicit versioning.
+- Charts, persistence, and setup logic must all handle high/low zone bounds.
 
-## ADR-006: FastAPI + Next.js stack
+## ADR-006: Composite Score With Sub-Scores
 
-- Date: 2026-03-10
 - Status: Accepted
-
-Context:
-
-The project needs a Python-centric analytics backend and a modern web frontend that can render tabular and chart-heavy views without unnecessary complexity.
+- Date: 2026-03-19
 
 Decision:
 
-The MVP stack will be:
+- Use a 0-100 weighted composite range score plus `Range Validity Score`, `Tradeability Score`, and `Opportunity Score`.
 
-- Backend: Python, FastAPI, pandas, numpy, SQLAlchemy, Alembic, PostgreSQL
-- Frontend: Next.js, TypeScript, Tailwind CSS, candlestick chart library
+Rationale:
 
-Consequences:
+- A single rank is useful for scanning, but sub-scores keep the system explainable.
 
-- Analytics logic stays close to the Python data ecosystem.
-- The frontend remains decoupled and consumes the backend via REST.
-- Local development should treat backend and frontend as separate apps inside one monorepo.
+Implications:
+
+- Persistence and UI should store and display component-level metrics.
+
+## ADR-007: Historical Candles For Analytics, Live Quotes Only For Display
+
+- Status: Accepted
+- Date: 2026-03-19
+
+Decision:
+
+- All indicators, range detection, scoring, and setup generation must be based on completed historical candles only.
+- If live quotes are used, they may only show current price relative to precomputed zones and setups.
+
+Rationale:
+
+- This avoids contaminating analytics with incomplete bars.
+- It keeps the signal definition stable and reproducible.
+
+Implications:
+
+- Historical and live data providers must be explicitly separated in code and docs.
+- UI labeling must distinguish scan-derived values from optional live quote context.
+
+## ADR-008: SQLite For MVP
+
+- Status: Accepted
+- Date: 2026-03-19
+
+Decision:
+
+- Use SQLite as the default persistence layer for MVP.
+
+Rationale:
+
+- It minimizes setup friction for a local single-developer workflow.
+- It is sufficient for an S&P 500 end-of-day screener.
+
+Implications:
+
+- Query design should remain portable to PostgreSQL.
+- Avoid introducing SQLite-specific behavior into core business logic.

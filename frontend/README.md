@@ -24,6 +24,17 @@ This directory will hold the Next.js dashboard for browsing ranked ranges, inspe
 - Treat the backend API as the source of truth.
 - Keep chart-specific data transformation in frontend utilities, not page components.
 
-## Immediate next step
+## Local frontend workflow
 
-Bootstrap the Next.js app, wire Tailwind CSS, then build the dashboard shell against the documented API responses.
+```bash
+npm install
+npm run dev
+```
+
+The frontend consumes the backend API only and renders:
+
+- dashboard summary cards
+- ranked ranges table
+- top opportunities section
+- alerts panel
+- stock detail page with candlestick chart overlays

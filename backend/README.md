@@ -27,6 +27,28 @@ This directory will hold the FastAPI service, database models, domain logic, and
 - ORM models define storage, not business rules.
 - Indicator and scoring formulas should remain isolated and unit-tested.
 
-## Immediate next step
+## Local backend workflow
 
-Bootstrap the Python project, wire FastAPI, SQLAlchemy, and Alembic, then make the health endpoint run against local settings.
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+alembic upgrade head
+python -m app.jobs.run_scan
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+## Implemented MVP modules
+
+- `app/core/`: settings and shared constants
+- `app/db/`: SQLAlchemy base and session management
+- `app/models/`: ORM models for all documented MVP tables
+- `app/services/`: provider abstraction, Stooq historical provider, local seed fallback provider, ingestion, indicators, range detection, scoring, setups, alerts, and scan orchestration
+- `app/api/`: health, ranges, range detail, opportunities, and alerts routes
+- `app/jobs/run_scan.py`: local seed/init scan entrypoint
+
+## Market data source of truth
+
+- `MARKET_DATA_PROVIDER=stooq` is the default runtime source for real daily OHLCV prices.
+- `MARKET_DATA_PROVIDER=local_seed` remains available only for deterministic offline/demo runs.
+- The UI displays persisted scan snapshots, so scan jobs must run against a real provider if you expect realistic closes in the API and frontend.

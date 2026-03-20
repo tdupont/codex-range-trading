@@ -32,7 +32,8 @@ coverage/
 dist/
 build/
 *.log
+.streamlit/
 
 # Database / misc
 *.sqlite3
-
+*.db

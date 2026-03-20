@@ -1,78 +1,95 @@
 # Product Requirements Document
 
-## Product overview
+## Product Overview
 
-Range Trading Screener is a web application that scans the S&P 500 daily, identifies stocks trading inside a stable range, scores them, and presents actionable long and short setups based on support and resistance zones.
+Range Trading Screener is a Streamlit app that scans the S&P 500 for stocks trading inside defined price ranges, ranks those candidates, and presents simple long and short setups based on support and resistance zones.
 
-The MVP is decision-support software, not an execution engine. It helps a user find candidates, understand why they were selected, and inspect the range structure behind each setup.
+The MVP is a decision-support tool. It is not a trading system, broker integration, or alert execution platform. The core job of the product is to turn daily historical market data into a ranked, reviewable list of range-bound stocks with transparent setup logic.
 
 ## Goals
 
-- Reduce the manual effort required to find range-bound S&P 500 stocks.
-- Apply a consistent, transparent rule set for range detection and setup generation.
-- Rank candidates so users can focus on the highest-quality range setups first.
-- Expose the results through a clean API and a web dashboard.
-- Keep the first version simple enough to implement and validate quickly.
+- Reduce manual chart review needed to find range-bound S&P 500 stocks.
+- Use a transparent, rule-based process that another developer can implement and verify.
+- Produce ranked candidates rather than a flat pass/fail list.
+- Show support and resistance zones, not just labels or single price levels.
+- Keep the MVP simple enough for one developer to build and run locally.
 
-## Non-goals
+## Non-Goals
 
-- Broker connectivity or order placement
-- Automated trading or alert-driven execution
-- Machine learning or predictive modeling
-- Options analytics
-- Intraday or multi-timeframe signal generation
-- Portfolio tracking, PnL, or risk aggregation
-- Coverage beyond the S&P 500 for MVP
+- Broker integration
+- Auto execution
+- Machine learning or predictive models
+- Options analysis
+- Intraday signal generation
+- Portfolio tracking
+- User authentication
+- Multi-user collaboration
+- Universe expansion beyond the S&P 500 in MVP
 
-## Target users
+## Target Users
 
-- Discretionary swing traders looking for daily range setups
-- Independent traders who want a ranked watchlist instead of manual chart review
-- Developers or analysts validating a rules-based screening workflow
+- Independent traders reviewing end-of-day opportunities
+- Swing traders looking for bounded daily range setups
+- Developers validating a rules-based market screening workflow
 
-## MVP scope
+## MVP Scope
 
-### In scope
+### In Scope
 
-- S&P 500 stock universe only
-- Daily candles only
-- OHLCV ingestion and storage
+- S&P 500 universe only
+- Daily candles as the primary supported mode
+- Weekly and monthly selectable modes if implemented without compromising the daily-first architecture
+- Historical OHLCV ingestion
 - Technical indicator computation
-- Rule-based range detection
-- Range score computation and ranking
+- Range detection
+- Range scoring and ranking
 - Support and resistance zone generation
 - Simple long and short setup generation
-- REST API for dashboard consumption
-- Web dashboard for list and detail views
+- Local persistence of scan outputs
+- Streamlit dashboard
+- Plotly chart visualizations
+- Optional latest quote positioning relative to precomputed zones
 
-### Out of scope
+### Out Of Scope
 
-- All items listed in Non-goals
+- Any feature listed in Non-Goals
+- Mandatory separate backend API service for MVP
+- Real-time streaming analytics
 
-## Feature requirements
+## Feature Requirements
 
-### Market data ingestion
+### Market Universe
 
-- The system must ingest daily OHLCV data for all tracked S&P 500 tickers.
-- The system must preserve adjusted historical data assumptions in a consistent way. If the provider supplies adjusted and unadjusted values, ingestion must document which is used.
-- The system must support re-running ingestion without duplicating rows.
+- The app must operate on the S&P 500 only for MVP.
+- The universe source must be refreshable and stored locally.
+- The system should allow inactive tickers to remain in storage for auditability rather than deleting history.
 
-### Technical analysis pipeline
+### Historical Data Ingestion
 
-- The system must compute at least ADX(14), SMA(20), ATR(14), and RSI(14).
-- Indicator calculations must be reproducible and tied to a specific trade date and ticker.
-- Derived metrics used by the range engine must be stored or reproducible from stored inputs.
+- The app must ingest OHLCV bars for the chosen timeframe.
+- Daily bars are required.
+- Weekly and monthly can be added as alternate scan modes if they use the same provider abstraction and persistence model.
+- Ingestion must be repeatable without duplicating bars.
+- Historical bars must be stored with provider metadata and ingestion timestamps.
 
-### Range detection
+### Indicators
 
-A stock is considered range-bound only when all conditions are true:
+- The app must compute at least ADX(14), SMA(20), ATR(14), and RSI(14).
+- Derived fields used for detection or scoring must be reproducible from stored inputs.
+- Indicator snapshots must be tied to ticker, timeframe, and bar date.
+
+### Range Detection
+
+A stock qualifies as range-bound only when all of the following are true for the scan timeframe:
 
 - `ADX(14) < 20`
-- `abs(slope(SMA(20))) < configured_threshold`
-- Over the last 30 trading days, at least 90% of closes remain inside the rolling 30-day high/low bounds
-- At least 2 touches near support
-- At least 2 touches near resistance
-- Range width is at least `1.5 * ATR(14)`
+- normalized slope of `SMA(20)` is near zero
+- support and resistance are derived from a fixed 30-bar lookback window
+- there are at least 2 or 3 separated touches at both boundaries
+- touch tolerance is ATR-based
+- range width is at least `2 x ATR(14)`
+- net 30-bar drift is small relative to range width
+- there is no recent breakout close outside the zone
 
 Definitions for MVP:
 
@@ -82,137 +99,117 @@ Definitions for MVP:
 - `resistance_zone = [upper_bound - 0.3 * ATR, upper_bound]`
 - `midline = (upper_bound + lower_bound) / 2`
 
-Touch rules for MVP:
+Touch guidance:
 
-- A support touch occurs when the candle low or close enters the support zone.
-- A resistance touch occurs when the candle high or close enters the resistance zone.
-- Multiple consecutive days in the same zone should not all count as separate touches unless separated by a configurable cooldown or a move back toward the midline.
+- Touches must be separated to avoid counting clusters as multiple independent tests.
+- A touch should be counted when price enters the relevant zone within ATR-based tolerance.
+- The implementation should use a configurable bar-separation rule and record the chosen value in code and docs.
 
-### Scoring and ranking
+### Scoring
 
-The system must compute a composite range score from 0 to 100 using these weighted components:
+The app must produce a `range_score` from 0 to 100 using these weights:
 
-- Touch quality: 30%
-- Trend weakness / ADX: 20%
-- Containment quality: 15%
-- Range width vs ATR: 15%
-- Liquidity: 10%
-- Current opportunity location: 10%
+- touch quality: 30%
+- trend weakness / ADX: 20%
+- containment quality: 15%
+- range width vs ATR: 15%
+- liquidity: 10%
+- current opportunity location: 10%
 
-The system must also expose:
+The app must also expose:
 
 - Range Validity Score
 - Tradeability Score
 - Opportunity Score
 
-Scoring must be explainable. The dashboard and API must be able to show component values, not just a final number.
+Scores must be explainable. The user should be able to inspect component-level values.
 
-### Setup generation
+### Setup Generation
 
-Long setup criteria:
+Long setup conditions:
 
-- Current price is inside the support zone
-- `RSI < 40`
-- Basic bullish rejection condition
+- price is in the support zone
+- RSI < 40
+- a basic bullish rejection condition is true
 
-Short setup criteria:
+Short setup conditions:
 
-- Current price is inside the resistance zone
-- `RSI > 60`
-- Basic bearish rejection condition
-
-MVP rejection assumptions:
-
-- Bullish rejection: close > open and lower wick is larger than the candle body
-- Bearish rejection: close < open and upper wick is larger than the candle body
+- price is in the resistance zone
+- RSI > 60
+- a basic bearish rejection condition is true
 
 Targets:
 
-- `target_1 = midline`
-- `target_2 = opposite side of range`
+- target 1 = midline
+- target 2 = opposite side of range
 
 Stops:
 
-- Long stop = support zone bottom - `0.5 * ATR`
-- Short stop = resistance zone top + `0.5 * ATR`
+- long stop = support zone bottom - `0.5 * ATR`
+- short stop = resistance zone top + `0.5 * ATR`
+
+The initial bullish and bearish rejection rules should be kept simple, deterministic, and based on completed candles only.
 
 ### Dashboard
 
-The UI must provide:
+- The app must provide a screener view with ranked results.
+- The app must provide a stock detail view with chart and score breakdown.
+- The app must expose the latest completed scan time.
+- The app may optionally show a latest quote and quote-to-zone distance if sourced separately from live quote data.
 
-- A ranked range list view
-- Filters for score, liquidity, and setup direction availability
-- A detail view for a selected ticker
-- Candlestick chart with support zone, resistance zone, midline, and setup levels
-- Clear explanation of why the ticker qualified
+## Functional Requirements
 
-### API
+- The system must maintain a canonical S&P 500 stock list.
+- The system must support local scan runs initiated by scripts or manual commands.
+- The analytics pipeline must be deterministic for the same input data and config.
+- Results must be queryable locally without recomputing everything inside the UI request path.
+- Streamlit page code must consume service-layer outputs rather than embedding full analytics logic in the page.
+- The app must make clear whether displayed price context is historical scan output or live quote positioning.
 
-The API must provide endpoints for health, ranges, range details, opportunities, and alerts.
+## Non-Functional Requirements
 
-## Functional requirements
+- Favor clarity over abstraction-heavy design.
+- Optimize for a single-developer local workflow.
+- Persist enough metadata to debug why a ticker qualified.
+- Use SQLite by default for MVP.
+- Keep room for future PostgreSQL migration without redesigning core entities.
+- Keep data provider integration behind abstractions.
+- Ensure charts and pages remain responsive for an S&P 500-sized result set.
 
-- The system must maintain a canonical stock list for the S&P 500 universe.
-- The system must support daily scheduled scans and manual re-scan triggers in development.
-- The range engine must produce deterministic output for the same input dataset and config.
-- The API must allow filtering and pagination for ranked results.
-- The UI must read from the API only; detection logic must not be duplicated in the frontend.
-- Alerts may be simple persisted events for when a ticker newly enters a long or short opportunity state.
+## Acceptance Criteria
 
-## Non-functional requirements
+- A developer can set up the repo locally and run a Streamlit shell app.
+- Historical OHLCV data can be ingested and stored locally for S&P 500 symbols.
+- The indicator pipeline computes the documented indicators from completed candles.
+- The range detector applies the documented qualification rules.
+- Qualified ranges receive score components and a total score.
+- Generated setups include entries, stop, and two targets.
+- Results can be viewed in a Streamlit screener and a stock detail page.
+- Documentation is concrete enough for another coding agent to implement the MVP without redefining the product.
 
-- Prefer simple, observable modules over highly abstracted architecture.
-- Target a full daily scan runtime that is practical for a single-service MVP deployment.
-- Persist enough metadata to debug why a ticker passed or failed the screen.
-- Use PostgreSQL as the system of record.
-- Maintain clear separation between ingestion, indicators, detection, scoring, setup generation, and presentation.
-- Make configuration explicit through environment variables and documented defaults.
-
-## Acceptance criteria
-
-- A developer can ingest and store daily OHLCV data for the S&P 500.
-- A developer can run the indicator pipeline and persist derived values.
-- The range detector identifies qualifying tickers using the documented rules.
-- Each qualifying ticker has support/resistance zones, range metadata, and score components.
-- The API returns ranked ranges and single-ticker range details in documented shapes.
-- The frontend can render a ranked list and a ticker detail chart using API data only.
-- Long and short opportunities include entry zone, stop, and two targets.
-- Documentation is sufficient for a new coding agent to implement the system without guessing core product logic.
-
-## Definition of done
+## Definition Of Done
 
 The MVP is done when all of the following are true:
 
-- The backend service runs locally with PostgreSQL.
-- A scheduled or manually triggered scan can refresh the latest S&P 500 daily range results.
-- The API returns health, range list, range detail, opportunities, and alerts endpoints in stable documented shapes.
-- The frontend displays the latest ranked candidates and detail charts for a selected ticker.
-- Core logic is covered by automated tests for indicator input handling, range detection, scoring, and API serialization.
-- Documentation remains aligned with implementation.
+- daily scans for the S&P 500 run locally end-to-end
+- qualified ranges, scores, and setups are persisted in SQLite
+- the Streamlit app shows a ranked screener and a detailed single-stock view
+- charts display candles, support/resistance zones, midline, and setup levels
+- tests cover core detection, scoring, and persistence behavior
+- docs remain aligned with implementation choices
 
 ## Assumptions
 
-- End-of-day data freshness is acceptable for MVP.
-- S&P 500 membership can be refreshed periodically rather than intraday.
-- Daily range analysis is based on trading days present in the provider dataset, not calendar days.
-- Liquidity can be approximated with average daily dollar volume in the MVP.
+- End-of-day workflows are acceptable for MVP.
+- The daily timeframe is the primary operating mode.
+- Weekly and monthly scans, if added, reuse the same calculations at different bar granularities.
+- Liquidity can be approximated using average daily dollar volume or average share volume with documented assumptions.
+- Provider selection is not fixed yet and will be handled through abstractions.
 
-## Data Provider Abstraction
+## Open Implementation Questions
 
-Provider selection is intentionally deferred. The implementation should define a provider interface that can:
+- Which historical data provider will be the first real integration?
+- What exact normalized SMA slope threshold produces acceptable false positive rates?
+- Should MVP store only qualified ranges or all evaluated symbols with failure reasons?
 
-- list or refresh the S&P 500 universe
-- fetch historical daily OHLCV candles for one or many tickers
-- report provider-specific metadata such as timezone, adjustment behavior, and last available trade date
-
-Business logic must consume normalized daily bars and must not depend on a provider SDK directly. Any provider-specific mapping, throttling, and retry behavior belongs in the adapter layer.
-
-## Future work
-
-Clearly outside the MVP:
-
-- Expanded universes such as ETFs, Russell 1000, or custom watchlists
-- Multi-timeframe confirmation
-- Notifications via email, Slack, or push
-- User accounts and saved views
-- Execution workflows
+These should be resolved in implementation phases and recorded in `docs/DECISIONS.md`.

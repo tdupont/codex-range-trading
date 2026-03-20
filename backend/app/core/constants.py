@@ -1,0 +1,4 @@
+DEFAULT_SCAN_STATUS = "completed"
+SETUP_STATUS_ACTIVE = "active"
+SETUP_STATUS_INACTIVE = "inactive"
+ALERT_TYPE_NEW_OPPORTUNITY = "new_opportunity"
