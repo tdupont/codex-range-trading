@@ -4,7 +4,7 @@
 .vscode/
 
 # Local agent/runtime artifacts
-config/
+/config/
 
 # Environment
 .env
@@ -32,7 +32,7 @@ coverage/
 dist/
 build/
 *.log
-.streamlit/
+.streamlit/secrets.toml
 
 # Database / misc
 *.sqlite3

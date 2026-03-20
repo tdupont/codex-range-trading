@@ -83,6 +83,19 @@ Notes:
 - If an older local `.env` still points at PostgreSQL from previous experiments, the MVP will fall back to `sqlite:///data/range_trading.db` when the PostgreSQL driver is unavailable.
 - The bundled local provider uses a static S&P 500 seed file plus deterministic synthetic historical bars so the app remains runnable without market-data credentials.
 
+## Streamlit Cloud Deployment
+
+Use these settings when creating the app in Streamlit Cloud:
+
+- Main file path: `app/main.py`
+- Python version: `3.11` via [`runtime.txt`](/Users/tdupont/Desktop/1_PROJECTS/2026-finance-protos/finance-protos/codex-range-trading/runtime.txt)
+- App config: [`.streamlit/config.toml`](/Users/tdupont/Desktop/1_PROJECTS/2026-finance-protos/finance-protos/codex-range-trading/.streamlit/config.toml)
+
+Notes:
+
+- The `app/config/` package must be committed. If it is ignored, Cloud will fail with `ModuleNotFoundError` on `app.config.*`.
+- The app is safe to deploy without PostgreSQL credentials; it will fall back to local SQLite automatically when `psycopg` is unavailable.
+
 ## Near-Term Development Path
 
 - Phase 1: finish base project setup and local config
