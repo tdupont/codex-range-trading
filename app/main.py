@@ -18,7 +18,7 @@ import streamlit as st
 from app.components.tables import render_dataframe
 from app.config.logging import configure_logging
 from app.config.settings import settings
-from app.services.scan_service import ScanService
+from app.services.scan_service import ScanAlreadyRunningError, ScanService
 from app.services.storage_service import StorageService
 
 
@@ -38,12 +38,16 @@ def main() -> None:
     with controls_col:
         timeframe = st.selectbox("Timeframe", settings.supported_scan_timeframes, index=0)
         if st.button("Run Scan", type="primary", use_container_width=True):
-            with st.spinner("Running scan..."):
-                summary = scan_service.run_scan(timeframe)
-            st.success(
-                f"Scan complete for {summary.scan_bar_date}. "
-                f"{summary.ranges_detected} qualified ranges found."
-            )
+            try:
+                with st.spinner("Running scan..."):
+                    summary = scan_service.run_scan(timeframe)
+            except ScanAlreadyRunningError as exc:
+                st.warning(str(exc))
+            else:
+                st.success(
+                    f"Scan complete for {summary.scan_bar_date}. "
+                    f"{summary.ranges_detected} qualified ranges found."
+                )
     with info_col:
         st.write(
             "The MVP persists locally to SQLite and keeps analytics strictly separate from optional "
