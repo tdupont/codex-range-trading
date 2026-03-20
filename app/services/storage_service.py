@@ -170,6 +170,7 @@ class StorageService:
         if frame.empty:
             return frame
 
+        frame.insert(0, "rank", range(1, len(frame) + 1))
         frame["distance_to_support"] = frame["latest_close"] - frame["support_zone_high"]
         frame["distance_to_resistance"] = frame["resistance_zone_low"] - frame["latest_close"]
         frame["opportunity_side"] = frame.apply(

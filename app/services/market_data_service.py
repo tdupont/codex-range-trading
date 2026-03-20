@@ -12,6 +12,8 @@ from app.models import OHLCV, Stock
 from app.services.provider_interfaces import HistoricalMarketDataProvider
 from app.services.storage_service import StorageService
 
+TIMEFRAME_LOOKBACK_MULTIPLIERS = {"1d": 2, "1wk": 10, "1mo": 45}
+
 
 class MarketDataService:
     def __init__(self, settings: Settings, provider: HistoricalMarketDataProvider) -> None:
@@ -20,7 +22,8 @@ class MarketDataService:
 
     def ingest_universe(self, session: Session, stocks: list[Stock], timeframe: str) -> tuple[int, object]:
         last_completed_bar_date = self.provider.get_last_completed_bar_date(timeframe)
-        start_date = last_completed_bar_date - timedelta(days=self.settings.scan_lookback_bars * 2)
+        lookback_multiplier = TIMEFRAME_LOOKBACK_MULTIPLIERS.get(timeframe, 2)
+        start_date = last_completed_bar_date - timedelta(days=self.settings.scan_lookback_bars * lookback_multiplier)
         now = StorageService.utc_now()
         bars_written = 0
 

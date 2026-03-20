@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import csv
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from io import StringIO
 from math import pi
 from urllib.parse import urlencode
@@ -11,9 +11,77 @@ from urllib.request import urlopen
 
 import numpy as np
 import pandas as pd
+from pandas.tseries.offsets import BMonthEnd
 
 from app.config.settings import Settings
 from app.models import HistoricalBar, LiveQuote, UniverseMember
+
+SUPPORTED_TIMEFRAMES = {"1d", "1wk", "1mo"}
+
+
+def _validate_timeframe(timeframe: str) -> None:
+    if timeframe not in SUPPORTED_TIMEFRAMES:
+        raise ValueError(f"Unsupported timeframe '{timeframe}' for MVP provider.")
+
+
+def _last_completed_bar_date(timeframe: str) -> date:
+    _validate_timeframe(timeframe)
+    today = pd.Timestamp.today().normalize()
+    if timeframe == "1d":
+        return pd.bdate_range(end=today, periods=1)[0].date()
+    if timeframe == "1wk":
+        days_since_friday = (today.weekday() - 4) % 7
+        weekly_close = today - timedelta(days=days_since_friday or 7)
+        return pd.bdate_range(end=weekly_close, periods=1)[0].date()
+    monthly_close = today - BMonthEnd()
+    return pd.bdate_range(end=monthly_close, periods=1)[0].date()
+
+
+def _expanded_start_date(start_date: date, timeframe: str) -> date:
+    if timeframe == "1d":
+        return start_date
+    if timeframe == "1wk":
+        return (pd.Timestamp(start_date) - pd.Timedelta(days=14)).date()
+    return (pd.Timestamp(start_date) - pd.Timedelta(days=35)).date()
+
+
+def _resample_bars(frame: pd.DataFrame, ticker: str, timeframe: str, provider: str) -> list[HistoricalBar]:
+    if timeframe == "1d":
+        sampled = frame.copy()
+    else:
+        rule = "W-FRI" if timeframe == "1wk" else "BME"
+        sampled = (
+            frame.resample(rule)
+            .agg(
+                open=("open", "first"),
+                high=("high", "max"),
+                low=("low", "min"),
+                close=("close", "last"),
+                adjusted_close=("adjusted_close", "last"),
+                volume=("volume", "sum"),
+            )
+            .dropna(subset=["open", "high", "low", "close"])
+        )
+
+    bars: list[HistoricalBar] = []
+    for bar_date, row in sampled.iterrows():
+        bars.append(
+            HistoricalBar(
+                ticker=ticker,
+                timeframe=timeframe,
+                bar_date=bar_date.date(),
+                open=round(max(1.0, float(row["open"])), 4),
+                high=round(max(1.0, float(row["high"])), 4),
+                low=round(max(0.5, float(row["low"])), 4),
+                close=round(max(1.0, float(row["close"])), 4),
+                adjusted_close=round(max(1.0, float(row["adjusted_close"])), 4),
+                volume=float(row["volume"]),
+                provider=provider,
+                provider_timezone="America/New_York",
+                is_complete=True,
+            )
+        )
+    return bars
 
 
 class LocalSeedHistoricalProvider:
@@ -45,11 +113,10 @@ class LocalSeedHistoricalProvider:
         start_date: date,
         end_date: date,
     ) -> list[HistoricalBar]:
-        if timeframe != "1d":
-            raise ValueError(f"Unsupported timeframe '{timeframe}' for MVP provider.")
+        _validate_timeframe(timeframe)
 
-        dates = pd.bdate_range(start=start_date, end=end_date)
-        if len(dates) == 0:
+        daily_dates = pd.bdate_range(start=_expanded_start_date(start_date, timeframe), end=end_date)
+        if len(daily_dates) == 0:
             return []
 
         seed = sum(ord(char) for char in ticker)
@@ -58,54 +125,44 @@ class LocalSeedHistoricalProvider:
         amplitude = 2.2 + ((seed % 9) * 0.45)
         phase = (seed % 360) * pi / 180
         mode = seed % 5
-        path = anchor + amplitude * np.sin(np.linspace(phase, phase + 6 * pi, len(dates)))
+        path = anchor + amplitude * np.sin(np.linspace(phase, phase + 6 * pi, len(daily_dates)))
 
         if mode == 0:
-            path += np.linspace(-1.0, 1.0, len(dates))
+            path += np.linspace(-1.0, 1.0, len(daily_dates))
         elif mode == 1:
-            path += np.linspace(0.0, 6.0, len(dates))
+            path += np.linspace(0.0, 6.0, len(daily_dates))
         elif mode == 2:
-            path += np.linspace(0.0, -5.0, len(dates))
+            path += np.linspace(0.0, -5.0, len(daily_dates))
         elif mode == 3:
-            path += np.concatenate([np.zeros(len(dates) - 8), np.linspace(0, 4.5, 8)])
+            path += np.concatenate([np.zeros(len(daily_dates) - 8), np.linspace(0, 4.5, 8)])
 
         noise_scale = 0.35 + ((seed % 7) * 0.04)
-        closes = path + rng.normal(0, noise_scale, len(dates))
-        opens = closes + rng.normal(0, 0.45, len(dates))
-        highs = np.maximum(opens, closes) + rng.uniform(0.15, 1.0, len(dates))
-        lows = np.minimum(opens, closes) - rng.uniform(0.15, 1.0, len(dates))
-        volumes = (2_000_000 + rng.integers(0, 7_500_000, len(dates)) + (seed % 30) * 90_000).astype(float)
+        closes = path + rng.normal(0, noise_scale, len(daily_dates))
+        opens = closes + rng.normal(0, 0.45, len(daily_dates))
+        highs = np.maximum(opens, closes) + rng.uniform(0.15, 1.0, len(daily_dates))
+        lows = np.minimum(opens, closes) - rng.uniform(0.15, 1.0, len(daily_dates))
+        volumes = (2_000_000 + rng.integers(0, 7_500_000, len(daily_dates)) + (seed % 30) * 90_000).astype(float)
 
-        bars: list[HistoricalBar] = []
-        for trade_date, open_price, high_price, low_price, close_price, volume in zip(
-            dates, opens, highs, lows, closes, volumes, strict=True
-        ):
-            bars.append(
-                HistoricalBar(
-                    ticker=ticker,
-                    timeframe=timeframe,
-                    bar_date=trade_date.date(),
-                    open=round(max(1.0, float(open_price)), 4),
-                    high=round(max(1.0, float(high_price)), 4),
-                    low=round(max(0.5, float(low_price)), 4),
-                    close=round(max(1.0, float(close_price)), 4),
-                    adjusted_close=round(max(1.0, float(close_price)), 4),
-                    volume=float(volume),
-                    provider="local_seed",
-                    provider_timezone="America/New_York",
-                    is_complete=True,
-                )
-            )
-        return bars
+        daily_frame = pd.DataFrame(
+            {
+                "open": opens,
+                "high": highs,
+                "low": lows,
+                "close": closes,
+                "adjusted_close": closes,
+                "volume": volumes,
+            },
+            index=daily_dates,
+        )
+        resampled = _resample_bars(daily_frame, ticker, timeframe, provider="local_seed")
+        return [bar for bar in resampled if start_date <= bar.bar_date <= end_date]
 
     def get_last_completed_bar_date(self, timeframe: str) -> date:
-        if timeframe != "1d":
-            raise ValueError(f"Unsupported timeframe '{timeframe}' for MVP provider.")
-        return pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=1)[0].date()
+        return _last_completed_bar_date(timeframe)
 
 
 class StooqHistoricalProvider:
-    """Historical daily data provider backed by Stooq CSV downloads."""
+    """Historical data provider backed by Stooq CSV downloads."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -133,16 +190,14 @@ class StooqHistoricalProvider:
         start_date: date,
         end_date: date,
     ) -> list[HistoricalBar]:
-        if timeframe != "1d":
-            raise ValueError(f"Unsupported timeframe '{timeframe}' for MVP provider.")
+        _validate_timeframe(timeframe)
         with urlopen(self._build_daily_url(ticker), timeout=20) as response:  # noqa: S310
             payload = response.read().decode("utf-8")
-        return self._parse_daily_csv(ticker, payload, start_date, end_date)
+        daily_frame = self._parse_daily_csv(payload, _expanded_start_date(start_date, timeframe), end_date)
+        return [bar for bar in _resample_bars(daily_frame, ticker, timeframe, provider="stooq") if start_date <= bar.bar_date <= end_date]
 
     def get_last_completed_bar_date(self, timeframe: str) -> date:
-        if timeframe != "1d":
-            raise ValueError(f"Unsupported timeframe '{timeframe}' for MVP provider.")
-        return pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=1)[0].date()
+        return _last_completed_bar_date(timeframe)
 
     @staticmethod
     def _build_daily_url(ticker: str) -> str:
@@ -150,13 +205,8 @@ class StooqHistoricalProvider:
         return f"https://stooq.com/q/d/l/?{query}"
 
     @staticmethod
-    def _parse_daily_csv(
-        ticker: str,
-        payload: str,
-        start_date: date,
-        end_date: date,
-    ) -> list[HistoricalBar]:
-        bars: list[HistoricalBar] = []
+    def _parse_daily_csv(payload: str, start_date: date, end_date: date) -> pd.DataFrame:
+        rows: list[dict[str, float]] = []
         for row in csv.DictReader(StringIO(payload)):
             if not row:
                 continue
@@ -166,23 +216,20 @@ class StooqHistoricalProvider:
             if row["Open"] in {"", "0", "null"}:
                 continue
             close = float(row["Close"])
-            bars.append(
-                HistoricalBar(
-                    ticker=ticker,
-                    timeframe="1d",
-                    bar_date=bar_date,
-                    open=float(row["Open"]),
-                    high=float(row["High"]),
-                    low=float(row["Low"]),
-                    close=close,
-                    adjusted_close=close,
-                    volume=float(row["Volume"]),
-                    provider="stooq",
-                    provider_timezone="America/New_York",
-                    is_complete=True,
-                )
+            rows.append(
+                {
+                    "bar_date": pd.Timestamp(bar_date),
+                    "open": float(row["Open"]),
+                    "high": float(row["High"]),
+                    "low": float(row["Low"]),
+                    "close": close,
+                    "adjusted_close": close,
+                    "volume": float(row["Volume"]),
+                }
             )
-        return bars
+        if not rows:
+            return pd.DataFrame(columns=["open", "high", "low", "close", "adjusted_close", "volume"])
+        return pd.DataFrame(rows).set_index("bar_date").sort_index()
 
 
 class StooqLiveQuoteProvider:

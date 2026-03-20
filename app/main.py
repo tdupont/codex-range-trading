@@ -73,14 +73,12 @@ def main() -> None:
         st.warning("The latest scan produced no qualified ranges.")
         return
 
-    top_candidates = screener.head(10).copy()
-    top_longs = screener[screener["setup_direction"] == "long"].head(10).copy()
-    top_shorts = screener[screener["setup_direction"] == "short"].head(10).copy()
-
-    st.subheader("Top Ranked Range Candidates")
+    st.subheader("All Ranked Range Candidates")
+    st.caption(f"Showing all {len(screener)} qualified stocks for the latest {timeframe} scan in score order.")
     render_dataframe(
-        top_candidates[
+        screener[
             [
+                "rank",
                 "ticker",
                 "name",
                 "latest_close",
@@ -91,17 +89,10 @@ def main() -> None:
                 "support_zone",
                 "resistance_zone",
                 "setup_direction",
+                "target_summary",
             ]
         ]
     )
-
-    left, right = st.columns(2)
-    with left:
-        st.subheader("Top Long Opportunities")
-        render_dataframe(top_longs[["ticker", "range_score", "latest_close", "support_zone", "target_summary"]])
-    with right:
-        st.subheader("Top Short Opportunities")
-        render_dataframe(top_shorts[["ticker", "range_score", "latest_close", "resistance_zone", "target_summary"]])
 
 
 if __name__ == "__main__":

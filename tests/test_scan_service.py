@@ -52,3 +52,12 @@ def test_run_scan_releases_lock_after_failure(monkeypatch: pytest.MonkeyPatch) -
 
     assert service._scan_lock.acquire(blocking=False) is True
     service._scan_lock.release()
+
+
+def test_supported_scan_timeframes_default_to_daily_weekly_monthly() -> None:
+    assert DummySettings.default_timeframe == "1d"
+
+    from app.config.settings import Settings
+
+    settings = Settings()
+    assert settings.supported_scan_timeframes == ("1d", "1wk", "1mo")

@@ -39,7 +39,7 @@ setup_direction = st.sidebar.selectbox("Setup Direction", ["all", "long", "short
 liquidity_floor = st.sidebar.number_input("Minimum Avg Dollar Volume", min_value=0, value=0, step=1_000_000)
 near_support = st.sidebar.checkbox("Near Support")
 near_resistance = st.sidebar.checkbox("Near Resistance")
-max_rows = st.sidebar.slider("Max Rows", 10, 100, min(50, len(frame)))
+max_rows = st.sidebar.slider("Max Rows", 10, max(10, len(frame)), len(frame))
 
 filtered = frame.copy()
 filtered = filtered[filtered["range_score"] >= min_score]
@@ -56,6 +56,7 @@ st.write(f"{len(filtered)} rows shown from the latest `{timeframe}` scan.")
 render_dataframe(
     filtered[
         [
+            "rank",
             "ticker",
             "name",
             "latest_close",

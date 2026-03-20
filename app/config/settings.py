@@ -25,7 +25,7 @@ class Settings:
     market_universe: str = os.getenv("MARKET_UNIVERSE", "sp500")
     default_timeframe: str = os.getenv("DEFAULT_TIMEFRAME", "1d")
     supported_scan_timeframes: tuple[str, ...] = tuple(
-        part.strip() for part in os.getenv("SUPPORTED_SCAN_TIMEFRAMES", "1d").split(",") if part.strip()
+        part.strip() for part in os.getenv("SUPPORTED_SCAN_TIMEFRAMES", "1d,1wk,1mo").split(",") if part.strip()
     )
     scan_lookback_bars: int = int(os.getenv("SCAN_LOOKBACK_BARS", "180"))
     range_lookback_bars: int = int(os.getenv("RANGE_LOOKBACK_BARS", "30"))
